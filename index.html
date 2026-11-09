@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
@@ -128,9 +128,6 @@
         <label>日付
           <input id="date" type="date" required>
         </label>
-        <label>金額（任意）
-          <input id="amount" type="number" min="0" step="1">
-        </label>
         <label>出発地
           <input id="origin" required>
         </label>
@@ -163,6 +160,11 @@
 
   <section class="card">
     <h2>行先別集計</h2>
+    <div class="actions" style="margin-top:0;margin-bottom:12px">
+      <button type="button" class="secondary" id="summaryExportButton">
+        行先別集計をCSV出力
+      </button>
+    </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -190,7 +192,6 @@
             <th>出発地</th>
             <th>行先</th>
             <th class="num">距離（km）</th>
-            <th class="num">金額</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -201,7 +202,8 @@
 </main>
 
 <script>
-  const STORAGE_KEY = "driving-distance-records-v1";
+  // 新しい保存先を使い、以前の保存済み走行記録は読み込みません。
+  const STORAGE_KEY = "driving-distance-records-v2";
 
   let records = loadRecords();
   let editingId = null;
@@ -211,7 +213,8 @@
 
   function loadRecords() {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      return Array.isArray(saved) ? saved : [];
     } catch {
       return [];
     }
@@ -226,41 +229,55 @@
   }
 
   function currentMonth() {
-    return new Date().toISOString().slice(0, 7);
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    return `${year}-${month}`;
   }
 
   function getVisibleRecords() {
     const month = $("monthFilter").value;
     return records
-      .filter(r => !month || r.date.slice(0, 7) === month)
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .filter(record => !month || String(record.date || "").slice(0, 7) === month)
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  }
+
+  function getDestinationSummary(visible) {
+    const destinations = new Map();
+
+    for (const record of visible) {
+      const name = record.destination || "";
+      const item = destinations.get(name) || { count: 0, distance: 0 };
+      item.count += 1;
+      item.distance += Number(record.distance || 0);
+      destinations.set(name, item);
+    }
+
+    return [...destinations.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "ja"));
   }
 
   function render() {
+    updateMonthOptions();
+
     const visible = getVisibleRecords();
-    const totalKm = visible.reduce((sum, r) => sum + Number(r.distance || 0), 0);
+    const totalKm = visible.reduce(
+      (sum, record) => sum + Number(record.distance || 0),
+      0
+    );
 
     $("totalTrips").textContent = visible.length + "回";
     $("totalDistance").textContent = totalKm.toFixed(1) + " km";
 
-    const destinations = new Map();
-    for (const r of visible) {
-      const item = destinations.get(r.destination) || { count: 0, distance: 0 };
-      item.count += 1;
-      item.distance += Number(r.distance || 0);
-      destinations.set(r.destination, item);
-    }
-
     const summaryBody = $("summaryBody");
     summaryBody.replaceChildren();
 
-    const sortedDestinations = [...destinations.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], "ja"));
+    const destinations = getDestinationSummary(visible);
 
-    if (sortedDestinations.length === 0) {
+    if (destinations.length === 0) {
       summaryBody.append(rowWithMessage(3, "この月の記録はありません"));
     } else {
-      for (const [name, item] of sortedDestinations) {
+      for (const [name, item] of destinations) {
         const tr = document.createElement("tr");
         addCell(tr, name);
         addCell(tr, item.count + "回", true);
@@ -273,41 +290,32 @@
     recordsBody.replaceChildren();
 
     if (visible.length === 0) {
-      recordsBody.append(rowWithMessage(6, "走行記録はありません"));
+      recordsBody.append(rowWithMessage(5, "走行記録はありません"));
     } else {
-      for (const r of visible) {
+      for (const record of visible) {
         const tr = document.createElement("tr");
-        addCell(tr, r.date);
-        addCell(tr, r.origin);
-        addCell(tr, r.destination);
-        addCell(tr, Number(r.distance).toFixed(1), true);
-        addCell(
-          tr,
-          r.amount !== "" && r.amount != null
-            ? Number(r.amount).toLocaleString("ja-JP")
-            : "—",
-          true
-        );
+        addCell(tr, record.date || "");
+        addCell(tr, record.origin || "");
+        addCell(tr, record.destination || "");
+        addCell(tr, Number(record.distance || 0).toFixed(1), true);
 
         const actionCell = document.createElement("td");
 
         const editButton = document.createElement("button");
         editButton.textContent = "編集";
         editButton.className = "small-button secondary";
-        editButton.onclick = () => startEdit(r.id);
+        editButton.onclick = () => startEdit(record.id);
 
         const deleteButton = document.createElement("button");
         deleteButton.textContent = "削除";
         deleteButton.className = "small-button danger";
-        deleteButton.onclick = () => deleteRecord(r.id);
+        deleteButton.onclick = () => deleteRecord(record.id);
 
         actionCell.append(editButton, deleteButton);
         tr.append(actionCell);
         recordsBody.append(tr);
       }
     }
-
-    updateMonthOptions();
   }
 
   function addCell(tr, value, numeric = false) {
@@ -329,10 +337,14 @@
 
   function updateMonthOptions() {
     const select = $("monthFilter");
-    const selected = select.value || currentMonth();
-    const months = [...new Set(records.map(r => r.date.slice(0, 7)))]
-      .sort()
-      .reverse();
+    const previousSelection = select.value;
+
+    const months = [...new Set(
+      records
+        .map(record => String(record.date || "").slice(0, 7))
+        .filter(month => /^\d{4}-\d{2}$/.test(month))
+    )];
+
     const options = [...new Set([currentMonth(), ...months])]
       .sort()
       .reverse();
@@ -351,11 +363,36 @@
       select.append(option);
     }
 
-    select.value = options.includes(selected) ? selected : "";
+    if (previousSelection === "") {
+      select.value = "";
+    } else if (options.includes(previousSelection)) {
+      select.value = previousSelection;
+    } else {
+      select.value = currentMonth();
+    }
+  }
+
+  function downloadCsv(rows, filename) {
+    const csv = "\uFEFF" + rows
+      .map(row => row.map(escapeCsv).join(","))
+      .join("\r\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   $("mapButton").addEventListener("click", () => {
-    window.open("https://www.google.com/maps/", "_blank", "noopener,noreferrer");
+    window.open(
+      "https://www.google.com/maps/",
+      "_blank",
+      "noopener,noreferrer"
+    );
   });
 
   form.addEventListener("submit", event => {
@@ -368,12 +405,11 @@
       date: $("date").value,
       origin: $("origin").value.trim(),
       destination: $("destination").value.trim(),
-      distance: Number($("distance").value),
-      amount: $("amount").value === "" ? "" : Number($("amount").value)
+      distance: Number($("distance").value)
     };
 
     if (editingId) {
-      records = records.map(r => r.id === editingId ? record : r);
+      records = records.map(item => item.id === editingId ? record : item);
     } else {
       records.push(record);
     }
@@ -384,15 +420,14 @@
   });
 
   function startEdit(id) {
-    const record = records.find(r => r.id === id);
+    const record = records.find(item => item.id === id);
     if (!record) return;
 
     editingId = id;
-    $("date").value = record.date;
-    $("origin").value = record.origin;
-    $("destination").value = record.destination;
-    $("distance").value = record.distance;
-    $("amount").value = record.amount ?? "";
+    $("date").value = record.date || "";
+    $("origin").value = record.origin || "";
+    $("destination").value = record.destination || "";
+    $("distance").value = record.distance ?? "";
     $("formTitle").textContent = "走行記録を編集";
     $("saveButton").textContent = "変更を保存";
     $("cancelButton").hidden = false;
@@ -402,7 +437,7 @@
 
   function deleteRecord(id) {
     if (!confirm("この走行記録を削除しますか？")) return;
-    records = records.filter(r => r.id !== id);
+    records = records.filter(item => item.id !== id);
     saveRecords();
     render();
   }
@@ -422,31 +457,65 @@
   $("exportButton").addEventListener("click", () => {
     const visible = getVisibleRecords();
     const rows = [
-      ["日付", "申請者名", "車種", "排気量(cc)", "燃料", "出発地", "行先", "走行距離(km)", "金額"],
-      ...visible.map(r => [
-        r.date,
+      [
+        "日付",
+        "申請者名",
+        "車種",
+        "排気量(cc)",
+        "燃料",
+        "出発地",
+        "行先",
+        "走行距離(km)"
+      ],
+      ...visible.map(record => [
+        record.date,
         $("applicant").value,
         $("vehicle").value,
         $("engine").value,
         $("fuel").value,
-        r.origin,
-        r.destination,
-        r.distance,
-        r.amount
+        record.origin,
+        record.destination,
+        record.distance
       ])
     ];
 
-    const csv = "\uFEFF" + rows
-      .map(row => row.map(escapeCsv).join(","))
-      .join("\r\n");
+    const month = $("monthFilter").value || "全期間";
+    downloadCsv(rows, `走行記録_${month}.csv`);
+  });
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `走行記録_${$("monthFilter").value || "全期間"}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+  $("summaryExportButton").addEventListener("click", () => {
+    const visible = getVisibleRecords();
+    const destinations = getDestinationSummary(visible);
+
+    const header = [
+      "申請者名",
+      "車種",
+      "排気量(cc)",
+      "燃料",
+      "行先",
+      "走行回数",
+      "合計距離(km)"
+    ];
+
+    const applicant = $("applicant").value;
+    const vehicle = $("vehicle").value;
+    const engine = $("engine").value;
+    const fuel = $("fuel").value;
+
+    const dataRows = destinations.length
+      ? destinations.map(([name, item]) => [
+          applicant,
+          vehicle,
+          engine,
+          fuel,
+          name,
+          item.count,
+          item.distance.toFixed(1)
+        ])
+      : [[applicant, vehicle, engine, fuel, "", "", ""]];
+
+    const month = $("monthFilter").value || "全期間";
+    downloadCsv([header, ...dataRows], `行先別集計_${month}.csv`);
   });
 
   render();
