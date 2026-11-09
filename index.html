@@ -183,6 +183,7 @@
     <h2>走行記録</h2>
     <div class="actions" style="margin-top:0;margin-bottom:12px">
       <button type="button" class="secondary" id="exportButton">表示中の月をCSV出力</button>
+      <button type="button" class="danger" id="clearRecordsButton">すべての記録を消去</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -202,7 +203,6 @@
 </main>
 
 <script>
-  // 新しい保存先を使い、以前の保存済み走行記録は読み込みません。
   const STORAGE_KEY = "driving-distance-records-v2";
 
   let records = loadRecords();
@@ -441,6 +441,28 @@
     saveRecords();
     render();
   }
+
+  $("clearRecordsButton").addEventListener("click", () => {
+    if (records.length === 0) {
+      $("status").textContent = "消去する走行記録はありません。";
+      return;
+    }
+
+    if (!confirm("保存済みの走行記録をすべて消去します。この操作は取り消せません。よろしいですか？")) {
+      return;
+    }
+
+    records = [];
+    saveRecords();
+
+    if (editingId !== null) {
+      resetForm("すべての走行記録を消去しました。");
+    } else {
+      $("status").textContent = "すべての走行記録を消去しました。";
+    }
+
+    render();
+  });
 
   function resetForm(message = "") {
     editingId = null;
