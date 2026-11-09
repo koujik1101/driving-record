@@ -152,7 +152,8 @@
     <label style="max-width:260px">集計する月
       <select id="monthFilter"></select>
     </label>
-    <div class="stats" style="margin-top:14px">
+    <p class="note" id="periodLabel"></p>
+    <div class="stats">
       <div class="stat">走行回数<strong id="totalTrips">0回</strong></div>
       <div class="stat">合計距離<strong id="totalDistance">0 km</strong></div>
     </div>
@@ -230,15 +231,50 @@
 
   function currentMonth() {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    return `${year}-${month}`;
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function formatDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function getMonthRange(month) {
+    const [year, monthNumber] = month.split("-").map(Number);
+    const start = new Date(year, monthNumber - 2, 21);
+    const end = new Date(year, monthNumber - 1, 20);
+    return {
+      start: formatDate(start),
+      end: formatDate(end)
+    };
+  }
+
+  function getReportMonth(dateString) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateString || ""))) return "";
+    const [year, month, day] = dateString.split("-").map(Number);
+    const reportDate = new Date(year, month - 1 + (day >= 21 ? 1 : 0), 1);
+    return `${reportDate.getFullYear()}-${String(reportDate.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function getSelectedPeriodLabel() {
+    const month = $("monthFilter").value;
+    if (!month) return "集計期間：全期間";
+    const { start, end } = getMonthRange(month);
+    return `集計期間：${start} ～ ${end}`;
   }
 
   function getVisibleRecords() {
     const month = $("monthFilter").value;
+
     return records
-      .filter(record => !month || String(record.date || "").slice(0, 7) === month)
+      .filter(record => {
+        if (!month) return true;
+        const { start, end } = getMonthRange(month);
+        const date = String(record.date || "");
+        return date >= start && date <= end;
+      })
       .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   }
 
@@ -257,6 +293,58 @@
       .sort((a, b) => a[0].localeCompare(b[0], "ja"));
   }
 
+  function addCell(tr, value, numeric = false) {
+    const td = document.createElement("td");
+    td.textContent = value;
+    if (numeric) td.className = "num";
+    tr.append(td);
+  }
+
+  function rowWithMessage(colspan, message) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = colspan;
+    td.textContent = message;
+    td.className = "note";
+    tr.append(td);
+    return tr;
+  }
+
+  function updateMonthOptions() {
+    const select = $("monthFilter");
+    const previousSelection = select.value;
+
+    const reportMonths = records
+      .map(record => getReportMonth(record.date))
+      .filter(Boolean);
+
+    const options = [...new Set([currentMonth(), ...reportMonths])]
+      .sort()
+      .reverse();
+
+    select.replaceChildren();
+
+    const allOption = document.createElement("option");
+    allOption.value = "";
+    allOption.textContent = "すべての月";
+    select.append(allOption);
+
+    for (const month of options) {
+      const option = document.createElement("option");
+      option.value = month;
+      option.textContent = month;
+      select.append(option);
+    }
+
+    if (previousSelection === "") {
+      select.value = "";
+    } else if (options.includes(previousSelection)) {
+      select.value = previousSelection;
+    } else {
+      select.value = currentMonth();
+    }
+  }
+
   function render() {
     updateMonthOptions();
 
@@ -266,6 +354,7 @@
       0
     );
 
+    $("periodLabel").textContent = getSelectedPeriodLabel();
     $("totalTrips").textContent = visible.length + "回";
     $("totalDistance").textContent = totalKm.toFixed(1) + " km";
 
@@ -273,9 +362,8 @@
     summaryBody.replaceChildren();
 
     const destinations = getDestinationSummary(visible);
-
     if (destinations.length === 0) {
-      summaryBody.append(rowWithMessage(3, "この月の記録はありません"));
+      summaryBody.append(rowWithMessage(3, "この期間の記録はありません"));
     } else {
       for (const [name, item] of destinations) {
         const tr = document.createElement("tr");
@@ -315,60 +403,6 @@
         tr.append(actionCell);
         recordsBody.append(tr);
       }
-    }
-  }
-
-  function addCell(tr, value, numeric = false) {
-    const td = document.createElement("td");
-    td.textContent = value;
-    if (numeric) td.className = "num";
-    tr.append(td);
-  }
-
-  function rowWithMessage(colspan, message) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = colspan;
-    td.textContent = message;
-    td.className = "note";
-    tr.append(td);
-    return tr;
-  }
-
-  function updateMonthOptions() {
-    const select = $("monthFilter");
-    const previousSelection = select.value;
-
-    const months = [...new Set(
-      records
-        .map(record => String(record.date || "").slice(0, 7))
-        .filter(month => /^\d{4}-\d{2}$/.test(month))
-    )];
-
-    const options = [...new Set([currentMonth(), ...months])]
-      .sort()
-      .reverse();
-
-    select.replaceChildren();
-
-    const allOption = document.createElement("option");
-    allOption.value = "";
-    allOption.textContent = "すべての月";
-    select.append(allOption);
-
-    for (const month of options) {
-      const option = document.createElement("option");
-      option.value = month;
-      option.textContent = month;
-      select.append(option);
-    }
-
-    if (previousSelection === "") {
-      select.value = "";
-    } else if (options.includes(previousSelection)) {
-      select.value = previousSelection;
-    } else {
-      select.value = currentMonth();
     }
   }
 
@@ -477,6 +511,13 @@
   $("monthFilter").addEventListener("change", render);
 
   $("exportButton").addEventListener("click", () => {
+    const month = $("monthFilter").value;
+    const period = getSelectedPeriodLabel();
+
+    if (!confirm(`走行記録をCSV出力します。\n${period}\nよろしいですか？`)) {
+      return;
+    }
+
     const visible = getVisibleRecords();
     const rows = [
       [
@@ -501,14 +542,18 @@
       ])
     ];
 
-    const month = $("monthFilter").value || "全期間";
-    downloadCsv(rows, `走行記録_${month}.csv`);
+    downloadCsv(rows, `走行記録_${month || "全期間"}.csv`);
   });
 
   $("summaryExportButton").addEventListener("click", () => {
-    const visible = getVisibleRecords();
-    const destinations = getDestinationSummary(visible);
+    const month = $("monthFilter").value;
+    const period = getSelectedPeriodLabel();
 
+    if (!confirm(`行先別集計をCSV出力します。\n${period}\nよろしいですか？`)) {
+      return;
+    }
+
+    const destinations = getDestinationSummary(getVisibleRecords());
     const header = [
       "申請者名",
       "車種",
@@ -536,8 +581,10 @@
         ])
       : [[applicant, vehicle, engine, fuel, "", "", ""]];
 
-    const month = $("monthFilter").value || "全期間";
-    downloadCsv([header, ...dataRows], `行先別集計_${month}.csv`);
+    downloadCsv(
+      [header, ...dataRows],
+      `行先別集計_${month || "全期間"}.csv`
+    );
   });
 
   render();
