@@ -1,0 +1,455 @@
+﻿<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>走行距離記録・集計</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN",
+        "Noto Sans JP", sans-serif;
+      color: #1f2937;
+      background: #f3f6f8;
+    }
+    body { margin: 0; padding: 20px; }
+    main { max-width: 1000px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 1.6rem; }
+    h2 { margin: 0 0 14px; font-size: 1.15rem; }
+    .note { color: #52606d; font-size: .9rem; line-height: 1.6; }
+    .card {
+      background: #fff;
+      border: 1px solid #dce3e8;
+      border-radius: 12px;
+      padding: 18px;
+      margin: 16px 0;
+      box-shadow: 0 2px 8px #1020300a;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    label { display: block; font-size: .9rem; font-weight: 600; }
+    input, select, button { box-sizing: border-box; font: inherit; }
+    input, select {
+      width: 100%;
+      margin-top: 5px;
+      padding: 10px;
+      border: 1px solid #b9c4cc;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    button {
+      padding: 10px 14px;
+      border: 0;
+      border-radius: 8px;
+      background: #1267a5;
+      color: #fff;
+      cursor: pointer;
+    }
+    button.secondary { background: #536575; }
+    button.danger { background: #b42318; }
+    .status {
+      min-height: 1.5em;
+      margin-top: 8px;
+      color: #52606d;
+      font-size: .9rem;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .stat { padding: 14px; border-radius: 10px; background: #eef6fb; }
+    .stat strong { display: block; margin-top: 4px; font-size: 1.35rem; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    th, td {
+      padding: 9px 8px;
+      border-bottom: 1px solid #e3e8ec;
+      text-align: left;
+      white-space: nowrap;
+    }
+    th { background: #f7f9fa; }
+    td.num, th.num { text-align: right; }
+    .small-button { padding: 6px 9px; margin-right: 4px; font-size: .82rem; }
+    @media (max-width: 640px) {
+      body { padding: 12px; }
+      .grid, .stats { grid-template-columns: 1fr; }
+      .card { padding: 14px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>走行距離記録・集計</h1>
+  <p class="note">
+    日付・出発地・行先・実際に走行した距離を入力して記録できます。
+    走行距離は手動で入力してください。
+  </p>
+
+  <section class="card">
+    <h2>申請者・車両情報</h2>
+    <div class="grid">
+      <label>申請者名
+        <input id="applicant">
+      </label>
+      <label>排気量（cc）
+        <input id="engine" type="number" min="0">
+      </label>
+      <label>車種
+        <select id="vehicle">
+          <option value="" selected></option>
+          <option>普通車</option>
+          <option>軽自動車</option>
+          <option>ハイブリッド車</option>
+          <option>ディーゼル車</option>
+          <option>その他</option>
+        </select>
+      </label>
+      <label>燃料
+        <select id="fuel">
+          <option value="" selected></option>
+          <option>レギュラー</option>
+          <option>ハイオク</option>
+          <option>軽油</option>
+          <option>電気</option>
+          <option>その他</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 id="formTitle">走行記録を追加</h2>
+    <form id="recordForm">
+      <div class="grid">
+        <label>日付
+          <input id="date" type="date" required>
+        </label>
+        <label>金額（任意）
+          <input id="amount" type="number" min="0" step="1">
+        </label>
+        <label>出発地
+          <input id="origin" required>
+        </label>
+        <label>行先
+          <input id="destination" required>
+        </label>
+        <label>走行距離（km）
+          <input id="distance" type="number" min="0" step="0.1" required>
+        </label>
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary" id="mapButton">Googleマップを開く</button>
+        <button type="submit" id="saveButton">記録を保存</button>
+        <button type="button" class="secondary" id="cancelButton" hidden>編集を取り消す</button>
+      </div>
+      <div class="status" id="status" aria-live="polite"></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>集計</h2>
+    <label style="max-width:260px">集計する月
+      <select id="monthFilter"></select>
+    </label>
+    <div class="stats" style="margin-top:14px">
+      <div class="stat">走行回数<strong id="totalTrips">0回</strong></div>
+      <div class="stat">合計距離<strong id="totalDistance">0 km</strong></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>行先別集計</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>行先</th>
+            <th class="num">走行回数</th>
+            <th class="num">合計距離（km）</th>
+          </tr>
+        </thead>
+        <tbody id="summaryBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>走行記録</h2>
+    <div class="actions" style="margin-top:0;margin-bottom:12px">
+      <button type="button" class="secondary" id="exportButton">表示中の月をCSV出力</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>出発地</th>
+            <th>行先</th>
+            <th class="num">距離（km）</th>
+            <th class="num">金額</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="recordsBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+  const STORAGE_KEY = "driving-distance-records-v1";
+
+  let records = loadRecords();
+  let editingId = null;
+
+  const $ = id => document.getElementById(id);
+  const form = $("recordForm");
+
+  function loadRecords() {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  function saveRecords() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  }
+
+  function escapeCsv(value) {
+    return '"' + String(value ?? "").replaceAll('"', '""') + '"';
+  }
+
+  function currentMonth() {
+    return new Date().toISOString().slice(0, 7);
+  }
+
+  function getVisibleRecords() {
+    const month = $("monthFilter").value;
+    return records
+      .filter(r => !month || r.date.slice(0, 7) === month)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  function render() {
+    const visible = getVisibleRecords();
+    const totalKm = visible.reduce((sum, r) => sum + Number(r.distance || 0), 0);
+
+    $("totalTrips").textContent = visible.length + "回";
+    $("totalDistance").textContent = totalKm.toFixed(1) + " km";
+
+    const destinations = new Map();
+    for (const r of visible) {
+      const item = destinations.get(r.destination) || { count: 0, distance: 0 };
+      item.count += 1;
+      item.distance += Number(r.distance || 0);
+      destinations.set(r.destination, item);
+    }
+
+    const summaryBody = $("summaryBody");
+    summaryBody.replaceChildren();
+
+    const sortedDestinations = [...destinations.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "ja"));
+
+    if (sortedDestinations.length === 0) {
+      summaryBody.append(rowWithMessage(3, "この月の記録はありません"));
+    } else {
+      for (const [name, item] of sortedDestinations) {
+        const tr = document.createElement("tr");
+        addCell(tr, name);
+        addCell(tr, item.count + "回", true);
+        addCell(tr, item.distance.toFixed(1), true);
+        summaryBody.append(tr);
+      }
+    }
+
+    const recordsBody = $("recordsBody");
+    recordsBody.replaceChildren();
+
+    if (visible.length === 0) {
+      recordsBody.append(rowWithMessage(6, "走行記録はありません"));
+    } else {
+      for (const r of visible) {
+        const tr = document.createElement("tr");
+        addCell(tr, r.date);
+        addCell(tr, r.origin);
+        addCell(tr, r.destination);
+        addCell(tr, Number(r.distance).toFixed(1), true);
+        addCell(
+          tr,
+          r.amount !== "" && r.amount != null
+            ? Number(r.amount).toLocaleString("ja-JP")
+            : "—",
+          true
+        );
+
+        const actionCell = document.createElement("td");
+
+        const editButton = document.createElement("button");
+        editButton.textContent = "編集";
+        editButton.className = "small-button secondary";
+        editButton.onclick = () => startEdit(r.id);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.textContent = "削除";
+        deleteButton.className = "small-button danger";
+        deleteButton.onclick = () => deleteRecord(r.id);
+
+        actionCell.append(editButton, deleteButton);
+        tr.append(actionCell);
+        recordsBody.append(tr);
+      }
+    }
+
+    updateMonthOptions();
+  }
+
+  function addCell(tr, value, numeric = false) {
+    const td = document.createElement("td");
+    td.textContent = value;
+    if (numeric) td.className = "num";
+    tr.append(td);
+  }
+
+  function rowWithMessage(colspan, message) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = colspan;
+    td.textContent = message;
+    td.className = "note";
+    tr.append(td);
+    return tr;
+  }
+
+  function updateMonthOptions() {
+    const select = $("monthFilter");
+    const selected = select.value || currentMonth();
+    const months = [...new Set(records.map(r => r.date.slice(0, 7)))]
+      .sort()
+      .reverse();
+    const options = [...new Set([currentMonth(), ...months])]
+      .sort()
+      .reverse();
+
+    select.replaceChildren();
+
+    const allOption = document.createElement("option");
+    allOption.value = "";
+    allOption.textContent = "すべての月";
+    select.append(allOption);
+
+    for (const month of options) {
+      const option = document.createElement("option");
+      option.value = month;
+      option.textContent = month;
+      select.append(option);
+    }
+
+    select.value = options.includes(selected) ? selected : "";
+  }
+
+  $("mapButton").addEventListener("click", () => {
+    window.open("https://www.google.com/maps/", "_blank", "noopener,noreferrer");
+  });
+
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+
+    const record = {
+      id: editingId || (
+        crypto.randomUUID ? crypto.randomUUID() : String(Date.now())
+      ),
+      date: $("date").value,
+      origin: $("origin").value.trim(),
+      destination: $("destination").value.trim(),
+      distance: Number($("distance").value),
+      amount: $("amount").value === "" ? "" : Number($("amount").value)
+    };
+
+    if (editingId) {
+      records = records.map(r => r.id === editingId ? record : r);
+    } else {
+      records.push(record);
+    }
+
+    saveRecords();
+    resetForm("記録を保存しました。");
+    render();
+  });
+
+  function startEdit(id) {
+    const record = records.find(r => r.id === id);
+    if (!record) return;
+
+    editingId = id;
+    $("date").value = record.date;
+    $("origin").value = record.origin;
+    $("destination").value = record.destination;
+    $("distance").value = record.distance;
+    $("amount").value = record.amount ?? "";
+    $("formTitle").textContent = "走行記録を編集";
+    $("saveButton").textContent = "変更を保存";
+    $("cancelButton").hidden = false;
+    $("status").textContent = "";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function deleteRecord(id) {
+    if (!confirm("この走行記録を削除しますか？")) return;
+    records = records.filter(r => r.id !== id);
+    saveRecords();
+    render();
+  }
+
+  function resetForm(message = "") {
+    editingId = null;
+    form.reset();
+    $("formTitle").textContent = "走行記録を追加";
+    $("saveButton").textContent = "記録を保存";
+    $("cancelButton").hidden = true;
+    $("status").textContent = message;
+  }
+
+  $("cancelButton").addEventListener("click", () => resetForm());
+  $("monthFilter").addEventListener("change", render);
+
+  $("exportButton").addEventListener("click", () => {
+    const visible = getVisibleRecords();
+    const rows = [
+      ["日付", "申請者名", "車種", "排気量(cc)", "燃料", "出発地", "行先", "走行距離(km)", "金額"],
+      ...visible.map(r => [
+        r.date,
+        $("applicant").value,
+        $("vehicle").value,
+        $("engine").value,
+        $("fuel").value,
+        r.origin,
+        r.destination,
+        r.distance,
+        r.amount
+      ])
+    ];
+
+    const csv = "\uFEFF" + rows
+      .map(row => row.map(escapeCsv).join(","))
+      .join("\r\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `走行記録_${$("monthFilter").value || "全期間"}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  });
+
+  render();
+</script>
+</body>
+</html>
